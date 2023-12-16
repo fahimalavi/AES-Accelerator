@@ -80,200 +80,204 @@ Architecture RTL of AES_ENCRYPTION is
 	constant ROUNDS_COUNT : natural := 10;
 
 	TYPE 			Tstate IS (STATE_INIT, STATE_INIT_KEY, STATE_SBOX, STATE_MIXROWS, STATE_MIXCOLOUMN, STATE_ADD_ROUNDKEY, STATE_COMPLETE);
-  SIGNAL 		state: Tstate := STATE_INIT;
-  SIGNAL 		next_state: Tstate;
-	SIGNAL 		current_round_key: std_logic_vector(127 downto 0);
-	SIGNAL 		current_round_data: std_logic_vector(127 downto 0);
-	SIGNAL 		mix_row_round_data: std_logic_vector(127 downto 0);
+    SIGNAL 		FSM_STATE: Tstate := STATE_INIT;
+	SIGNAL 		current_round_data: std_logic_vector(127 downto 0) := (others => '0');
 begin
 
-PROCESS(CLK, RESET)
+PROCESS (CLK, RESET)
+VARIABLE 	round: natural range 0 to 10 := 0;
 BEGIN
-  IF RESET'event and RESET='0' THEN
-    state <=STATE_INIT;
-  END IF;
   IF CLK'event and rising_edge(CLK) THEN
-    state <= next_state;
+    IF RESET='0' THEN
+        FSM_STATE <=STATE_INIT;
+    else
+        CASE FSM_STATE IS
+            WHEN STATE_INIT =>
+                round := 0;
+                CIPHER <= x"00000000000000000000000000000000";
+                ENCRYPTION_STATUS <= '0';
+                if(ENCRYPT_ENABLE='1' and EXP_KEYS_PRESENT='1') then
+                    current_round_data <= INITIAL_KEY xor PLAIN_TEXT;
+                    FSM_STATE <= STATE_SBOX;
+                else 
+                    current_round_data <=  (others => '1');
+                    FSM_STATE <= STATE_INIT;
+                end if;
+            WHEN STATE_SBOX =>
+                round := round + 1;
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '0';
+                current_round_data(127 downto 120) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(127 downto 120)))));
+                current_round_data(119 downto 112) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(119 downto 112)))));
+                current_round_data(111 downto 104)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(111 downto 104)))));
+                current_round_data(103 downto 96)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(103 downto 96)))));
+                current_round_data(95 downto 88) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(95 downto 88)))));
+                current_round_data(87 downto 80) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(87 downto 80)))));
+                current_round_data(79 downto 72)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(79 downto 72)))));
+                current_round_data(71 downto 64)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(71 downto 64)))));
+                current_round_data(63 downto 56) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(63 downto 56)))));
+                current_round_data(55 downto 48) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(55 downto 48)))));
+                current_round_data(47 downto 40) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(47 downto 40)))));
+                current_round_data(39 downto 32)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(39 downto 32)))));
+                current_round_data(31 downto 24) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(31 downto 24)))));
+                current_round_data(23 downto 16) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(23 downto 16)))));
+                current_round_data(15 downto 8)		<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(15 downto 8)))));
+                current_round_data(7 downto 0)		<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(7 downto 0)))));
+                FSM_STATE <= STATE_MIXROWS;
+            WHEN STATE_MIXROWS =>
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '0';				
+                -- ShiftRows() cyclically shifts the last three rows in the State. 
+                -- R0
+                -- R1
+                current_round_data(119 downto 112) <= current_round_data(87 downto 80);
+                current_round_data(87 downto 80) <= current_round_data(55 downto 48);
+                current_round_data(55 downto 48) <= current_round_data(23 downto 16);
+                current_round_data(23 downto 16) <= current_round_data(119 downto 112);
+                -- R2
+                current_round_data(111 downto 104) <= current_round_data(47 downto 40);
+                current_round_data(79 downto 72) <= current_round_data(15 downto 8);
+                current_round_data(47 downto 40) <= current_round_data(111 downto 104);
+                current_round_data(15 downto 8) <= current_round_data(79 downto 72);
+                -- R3
+                current_round_data(103 downto 96) <= current_round_data(7 downto 0);
+                current_round_data(71 downto 64) <= current_round_data(103 downto 96);
+                current_round_data(39 downto 32) <= current_round_data(71 downto 64);
+                current_round_data(7 downto 0) <= current_round_data(39 downto 32);
+                if(round = 10) then
+                    FSM_STATE <= STATE_ADD_ROUNDKEY;
+                else
+                    FSM_STATE <= STATE_MIXCOLOUMN;
+                end if;
+            WHEN STATE_MIXCOLOUMN =>
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '0';
+                for i in 3 downto 0 loop
+    --	constant MIX_C_MATRIX_R1 : RowArray := (x"02",x"03",x"01",x"01");
+                    if(current_round_data((i*32)+31)='0')		then
+                        if (current_round_data((i*32)+23) = '0') then
+                            current_round_data((i*32)+31 downto (i*32)+24)	<= std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16)) xor
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
+                        else
+                            current_round_data((i*32)+31 downto (i*32)+24)	<= std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16) xor IRREDUCIBLE_POLY) xor
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
+                        end if;
+                    else	
+                        if (current_round_data((i*32)+23) = '0') then
+                            current_round_data((i*32)+31 downto (i*32)+24)	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16)) xor
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
+                        else
+                            current_round_data((i*32)+31 downto (i*32)+24)	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16) xor IRREDUCIBLE_POLY) xor
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
+                        end if;
+                    end if;
+    
+    --	constant MIX_C_MATRIX_R2 : RowArray := (x"01",x"02",x"03",x"01");
+                    if(current_round_data((i*32)+23)='0')		then
+                        if (current_round_data((i*32)+15) = '0') then
+                            current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
+                                                                                                            std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8)) xor 
+                                                                                                            current_round_data((i*32)+7 downto (i*32));
+                        else
+                            current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
+                                                                                                            std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            current_round_data((i*32)+7 downto (i*32));
+                            
+                        end if;
+                    else	
+                        if (current_round_data((i*32)+15) = '0') then
+                            current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor IRREDUCIBLE_POLY) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8)) xor 
+                                                                                                            current_round_data((i*32)+7 downto (i*32));
+                        else
+                            current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor IRREDUCIBLE_POLY) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            current_round_data((i*32)+7 downto (i*32));
+                        end if;					
+                    end if;
+    
+    --	constant MIX_C_MATRIX_R3 : RowArray := (x"01",x"01",x"02",x"03");
+                    if(current_round_data((i*32)+15)='0')		then
+                        if (current_round_data((i*32)+7) = '0') then
+                            current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1))) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)));
+                        else
+                            current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1))) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)) xor IRREDUCIBLE_POLY);
+                        end if;
+                    else	
+                        if (current_round_data((i*32)+7) = '0') then
+                            current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)));
+                        else
+                            current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)) xor IRREDUCIBLE_POLY);
+                        end if;
+                    end if;
+    
+    --	constant MIX_C_MATRIX_R4 : RowArray := (x"03",x"01",x"01",x"02");
+                    if(current_round_data((i*32)+7)='0')		then
+                        if (current_round_data((i*32)+31) = '0') then
+                            current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24)) xor 
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor
+                                                                                                            current_round_data((i*32)+23 downto (i*32)+16) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)));
+                        else
+                            current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor
+                                                                                                            current_round_data((i*32)+23 downto (i*32)+16) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)));
+                        end if;
+                    else	
+                        if (current_round_data((i*32)+31) = '0') then
+                            current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24)) xor 
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor
+                                                                                                            current_round_data((i*32)+23 downto (i*32)+16) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor IRREDUCIBLE_POLY);
+                        else
+                            current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24) xor IRREDUCIBLE_POLY) xor 
+                                                                                                            current_round_data((i*32)+15 downto (i*32)+8) xor
+                                                                                                            current_round_data((i*32)+23 downto (i*32)+16) xor 
+                                                                                                            (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor IRREDUCIBLE_POLY);
+                        end if;
+                    end if;
+                end loop;  -- i
+                FSM_STATE <= STATE_ADD_ROUNDKEY;
+            WHEN STATE_ADD_ROUNDKEY =>	
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '0';
+                current_round_data <= current_round_data xor KEYS_EXP((128*round)-1 downto (128*(round-1)));
+                if(round = ROUNDS_COUNT) then
+                    FSM_STATE <= STATE_COMPLETE;
+                else
+                    FSM_STATE <= STATE_SBOX;
+                end if;
+        WHEN STATE_COMPLETE =>
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '1';
+                FSM_STATE <= STATE_COMPLETE;
+                if(ENCRYPT_ENABLE='0') then
+                    FSM_STATE <= STATE_INIT;
+                end if;
+            WHEN OTHERS =>
+                CIPHER <= current_round_data;
+                ENCRYPTION_STATUS <= '0';
+                FSM_STATE <= STATE_INIT;
+        END CASE;
+    END IF;
   END IF;
-END PROCESS;
-
-PROCESS (state, ENCRYPT_ENABLE, EXP_KEYS_PRESENT, PLAIN_TEXT)
-VARIABLE 	round: natural range 0 to 10;
-BEGIN
-	CASE state IS
-		WHEN STATE_INIT =>
-			round := 0;
-			CIPHER <= x"00000000000000000000000000000000";
-			ENCRYPTION_STATUS <= '0';
-			if(ENCRYPT_ENABLE='1' and EXP_KEYS_PRESENT='1') then
-				current_round_data <= INITIAL_KEY xor PLAIN_TEXT;
-				next_state <= STATE_SBOX;
-			else 
-				next_state <= STATE_INIT;
-			end if;
-		WHEN STATE_SBOX =>
-			round := round + 1;
-			current_round_data(127 downto 120) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(127 downto 120)))));
-			current_round_data(119 downto 112) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(119 downto 112)))));
-			current_round_data(111 downto 104)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(111 downto 104)))));
-			current_round_data(103 downto 96)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(103 downto 96)))));
-			current_round_data(95 downto 88) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(95 downto 88)))));
-			current_round_data(87 downto 80) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(87 downto 80)))));
-			current_round_data(79 downto 72)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(79 downto 72)))));
-			current_round_data(71 downto 64)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(71 downto 64)))));
-			current_round_data(63 downto 56) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(63 downto 56)))));
-			current_round_data(55 downto 48) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(55 downto 48)))));
-			current_round_data(47 downto 40) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(47 downto 40)))));
-			current_round_data(39 downto 32)	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(39 downto 32)))));
-			current_round_data(31 downto 24) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(31 downto 24)))));
-			current_round_data(23 downto 16) 	<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(23 downto 16)))));
-			current_round_data(15 downto 8)		<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(15 downto 8)))));
-			current_round_data(7 downto 0)		<= std_logic_vector(SBOX(to_integer(unsigned(current_round_data(7 downto 0)))));
-			next_state <= STATE_MIXROWS;
-		WHEN STATE_MIXROWS =>				
-			-- ShiftRows() cyclically shifts the last three rows in the State. 
-			-- R0
-			-- R1
-			current_round_data(119 downto 112) <= current_round_data(87 downto 80);
-			current_round_data(87 downto 80) <= current_round_data(55 downto 48);
-			current_round_data(55 downto 48) <= current_round_data(23 downto 16);
-			current_round_data(23 downto 16) <= current_round_data(119 downto 112);
-			-- R2
-			current_round_data(111 downto 104) <= current_round_data(47 downto 40);
-			current_round_data(79 downto 72) <= current_round_data(15 downto 8);
-			current_round_data(47 downto 40) <= current_round_data(111 downto 104);
-			current_round_data(15 downto 8) <= current_round_data(79 downto 72);
-			-- R3
-			current_round_data(103 downto 96) <= current_round_data(7 downto 0);
-			current_round_data(71 downto 64) <= current_round_data(103 downto 96);
-			current_round_data(39 downto 32) <= current_round_data(71 downto 64);
-			current_round_data(7 downto 0) <= current_round_data(39 downto 32);
-			if(round = 10) then
-				next_state <= STATE_ADD_ROUNDKEY;
-			else
-				next_state <= STATE_MIXCOLOUMN;
-			end if;
-		WHEN STATE_MIXCOLOUMN =>
-			for i in 3 downto 0 loop
---	constant MIX_C_MATRIX_R1 : RowArray := (x"02",x"03",x"01",x"01");
-				if(current_round_data((i*32)+31)='0')		then
-					if (current_round_data((i*32)+23) = '0') then
-						current_round_data((i*32)+31 downto (i*32)+24)	<= std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16)) xor
-																										current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
-					else
-						current_round_data((i*32)+31 downto (i*32)+24)	<= std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16) xor IRREDUCIBLE_POLY) xor
-																										current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
-					end if;
-				else	
-					if (current_round_data((i*32)+23) = '0') then
-						current_round_data((i*32)+31 downto (i*32)+24)	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor IRREDUCIBLE_POLY) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16)) xor
-																										current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
-					else
-						current_round_data((i*32)+31 downto (i*32)+24)	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor IRREDUCIBLE_POLY) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor current_round_data((i*32)+23 downto (i*32)+16) xor IRREDUCIBLE_POLY) xor
-																										current_round_data((i*32)+15 downto (i*32)+8) xor current_round_data((i*32)+7 downto (i*32));
-					end if;
-				end if;
-
---	constant MIX_C_MATRIX_R2 : RowArray := (x"01",x"02",x"03",x"01");
-				if(current_round_data((i*32)+23)='0')		then
-					if (current_round_data((i*32)+15) = '0') then
-						current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
-																										std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8)) xor 
-																										current_round_data((i*32)+7 downto (i*32));
-					else
-						current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
-																										std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8) xor IRREDUCIBLE_POLY) xor 
-																										current_round_data((i*32)+7 downto (i*32));
-						
-					end if;
-				else	
-					if (current_round_data((i*32)+15) = '0') then
-						current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor IRREDUCIBLE_POLY) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8)) xor 
-																										current_round_data((i*32)+7 downto (i*32));
-					else
-						current_round_data((i*32)+23 downto (i*32)+16)	<= current_round_data((i*32)+31 downto (i*32)+24) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+23 downto (i*32)+16)),1)) xor IRREDUCIBLE_POLY) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor current_round_data((i*32)+15 downto (i*32)+8) xor IRREDUCIBLE_POLY) xor 
-																										current_round_data((i*32)+7 downto (i*32));
-					end if;					
-				end if;
-
---	constant MIX_C_MATRIX_R3 : RowArray := (x"01",x"01",x"02",x"03");
-				if(current_round_data((i*32)+15)='0')		then
-					if (current_round_data((i*32)+7) = '0') then
-						current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1))) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)));
-					else
-						current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1))) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)) xor IRREDUCIBLE_POLY);
-					end if;
-				else	
-					if (current_round_data((i*32)+7) = '0') then
-						current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor IRREDUCIBLE_POLY) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)));
-					else
-						current_round_data((i*32)+15 downto (i*32)+8)	<= current_round_data((i*32)+31 downto (i*32)+24) xor current_round_data((i*32)+23 downto (i*32)+16) xor
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+15 downto (i*32)+8)),1)) xor IRREDUCIBLE_POLY) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor current_round_data((i*32)+7 downto (i*32)) xor IRREDUCIBLE_POLY);
-					end if;
-				end if;
-
---	constant MIX_C_MATRIX_R4 : RowArray := (x"03",x"01",x"01",x"02");
-				if(current_round_data((i*32)+7)='0')		then
-					if (current_round_data((i*32)+31) = '0') then
-						current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24)) xor 
-																										current_round_data((i*32)+15 downto (i*32)+8) xor
-																										current_round_data((i*32)+23 downto (i*32)+16) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)));
-					else
-						current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24) xor IRREDUCIBLE_POLY) xor 
-																										current_round_data((i*32)+15 downto (i*32)+8) xor
-																										current_round_data((i*32)+23 downto (i*32)+16) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)));
-					end if;
-				else	
-					if (current_round_data((i*32)+31) = '0') then
-						current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24)) xor 
-																										current_round_data((i*32)+15 downto (i*32)+8) xor
-																										current_round_data((i*32)+23 downto (i*32)+16) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor IRREDUCIBLE_POLY);
-					else
-						current_round_data((i*32)+7 downto (i*32))	<= (std_logic_vector(shift_left(unsigned(current_round_data((i*32)+31 downto (i*32)+24)),1)) xor current_round_data((i*32)+31 downto (i*32)+24) xor IRREDUCIBLE_POLY) xor 
-																										current_round_data((i*32)+15 downto (i*32)+8) xor
-																										current_round_data((i*32)+23 downto (i*32)+16) xor 
-																										(std_logic_vector(shift_left(unsigned(current_round_data((i*32)+7 downto (i*32))),1)) xor IRREDUCIBLE_POLY);
-					end if;
-				end if;
-			end loop;  -- i
-			next_state <= STATE_ADD_ROUNDKEY;
-		WHEN STATE_ADD_ROUNDKEY =>	
-			current_round_data <= current_round_data xor KEYS_EXP((128*round)-1 downto (128*(round-1)));
-			if(round = ROUNDS_COUNT) then
-				next_state <= STATE_COMPLETE;
-			else
-				next_state <= STATE_SBOX;
-			end if;
-    WHEN STATE_COMPLETE =>
-			CIPHER <= current_round_data;
-			ENCRYPTION_STATUS <= '1';
-			next_state <= STATE_COMPLETE;
-			if(ENCRYPT_ENABLE='0') then
-				next_state <= STATE_INIT;
-			end if;
-		WHEN OTHERS =>
-			next_state <= STATE_INIT;
-	END CASE;
 END PROCESS;
 end RTL;
 

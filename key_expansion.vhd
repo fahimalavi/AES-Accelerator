@@ -42,10 +42,11 @@ PORT
 (
   CLK 					:in std_logic;
   RESET 				:in std_logic;
+  START_KEY_EXPANSION   :in std_logic;
 	CONFIG 				:in std_logic_vector(1 downto 0);
-	KEY						:in std_logic_vector(127 downto 0);
-	STATUS 				:out std_logic;
-	KEYS_EXP			:out std_logic_vector(1279 downto 0)
+	KEY					:in std_logic_vector(127 downto 0);
+	STATUS 				:out std_logic:='0';
+	KEYS_EXP			:out std_logic_vector(1279 downto 0) := (others => '0')
 );
 end KEY_EXPANSION;
 
@@ -76,94 +77,182 @@ architecture RTL of KEY_EXPANSION is
 		x"b0", x"54", x"bb", x"16");
 	constant RCONS : RconArray := (x"01", x"02", x"04", x"08", x"10", x"20", x"40", x"80", x"1B", x"36");
 	TYPE Tstate IS (STATE_INIT, STATE_ROTWORD, STATE_SUBWORD, STATE_RCON, STATE_NEXT_C1, STATE_NEXT_C2, STATE_NEXT_C3, STATE_NEXT_C4,  STATE_ROUND_COMPLETE, STATE_COMPLETE);
-  SIGNAL state: Tstate := STATE_INIT;
-  SIGNAL next_state: Tstate;
-	SIGNAL 		current_round_key: std_logic_vector(127 downto 0);
-	SIGNAL 		last_column: std_logic_vector(31 downto 0);
+  SIGNAL FSM_STATE: Tstate := STATE_INIT;
+  SIGNAL KEY_RESULT: std_logic:='0';
+	SIGNAL 		current_round_key: std_logic_vector(127 downto 0) := x"00000000000000000000000000000000";
+	SIGNAL 		last_column: std_logic_vector(31 downto 0) := x"00000000";
+	SIGNAL      KEYS_EXP_INT: std_logic_vector(1279 downto 0) := (others => '0');
 begin
 
-PROCESS(CLK, RESET)
-BEGIN
-  IF RESET'event and RESET='0' THEN
-    state <=STATE_INIT;
-  END IF;
-  IF CLK'event and rising_edge(CLK) THEN
-    state <= next_state;
-  END IF;
-END PROCESS;
 
-PROCESS (state)
-VARIABLE 	round: natural range 0 to 10;
+PROCESS (CLK,RESET)
+VARIABLE 	round: natural range 0 to 10 := 0;
 BEGIN
-	CASE state IS
-		WHEN STATE_INIT =>
-			STATUS <= '0';
-			round := 0;
-			current_round_key <= KEY;
-			next_state <= STATE_ROTWORD;
-		WHEN STATE_ROTWORD =>
-			last_column(31 downto 24) <= current_round_key(23 downto 16);
-			last_column(23 downto 16) <= current_round_key(15 downto 8);
-			last_column(15 downto 8) <= current_round_key(7 downto 0);
-			last_column(7 downto 0) <= current_round_key(31 downto 24);
-			next_state <= STATE_SUBWORD;
-		WHEN STATE_SUBWORD =>
-			last_column(31 downto 24) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(31 downto 24)))));
-			last_column(23 downto 16) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(23 downto 16)))));
-			last_column(15 downto 8) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(15 downto 8)))));
-			last_column(7 downto 0) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(7 downto 0)))));
-			next_state <= STATE_RCON;
-		WHEN STATE_RCON =>
-			last_column(31 downto 24) <= last_column(31 downto 24) xor std_logic_vector(RCONS(round));
-			round := round + 1;
-			next_state <= STATE_NEXT_C1;
-		WHEN STATE_NEXT_C1 =>
-			current_round_key(127 downto 96) <= current_round_key(127 downto 96) xor last_column;
-			next_state <= STATE_NEXT_C2;
-		WHEN STATE_NEXT_C2 =>
-			current_round_key(95 downto 64) <= current_round_key(95 downto 64) xor current_round_key(127 downto 96);
-			next_state <= STATE_NEXT_C3;
-		WHEN STATE_NEXT_C3 =>
-			current_round_key(63 downto 32) <= current_round_key(63 downto 32) xor current_round_key(95 downto 64);			
-			next_state <= STATE_NEXT_C4;
-		WHEN STATE_NEXT_C4 =>
-			current_round_key(31 downto 0) <= current_round_key(31 downto 0) xor current_round_key(63 downto 32);		
-			next_state <= STATE_ROUND_COMPLETE;
-		WHEN STATE_ROUND_COMPLETE =>				
-			if(round = 1) then
-				KEYS_EXP(127 downto 0) <= current_round_key;
-			elsif(round = 2) then
-				KEYS_EXP(255 downto 128) <= current_round_key;
-			elsif(round = 3) then
-				KEYS_EXP(383 downto 256) <= current_round_key;
-			elsif(round = 4) then
-				KEYS_EXP(511 downto 384) <= current_round_key;
-			elsif(round = 5) then
-				KEYS_EXP(639 downto 512) <= current_round_key;
-			elsif(round = 6) then
-				KEYS_EXP(767 downto 640) <= current_round_key;
-			elsif(round = 7) then
-				KEYS_EXP(895 downto 768) <= current_round_key;
-			elsif(round = 8) then
-				KEYS_EXP(1023 downto 896) <= current_round_key;
-			elsif(round = 9) then
-				KEYS_EXP(1151 downto 1024) <= current_round_key;
-			elsif(round = 10) then
-				KEYS_EXP(1279 downto 1152) <= current_round_key;
-			else
-				STATUS <= 'Z';
-			end if;
-			if(round = 10) then
-				next_state <= STATE_COMPLETE;
-			else
-				next_state <= STATE_ROTWORD;
-			end if;
-		WHEN STATE_COMPLETE =>
-			STATUS <= '1';
-			next_state <= STATE_COMPLETE;
-		WHEN OTHERS =>
-			next_state <= STATE_INIT;
-	END CASE;
+  IF CLK'event and rising_edge(CLK) THEN
+    IF RESET='0' THEN
+        FSM_STATE <=STATE_INIT;
+    else
+        CASE FSM_STATE IS
+            WHEN STATE_INIT =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                if(START_KEY_EXPANSION='1' and KEY_RESULT='0') then
+                    FSM_STATE <= STATE_ROTWORD;
+                else
+                    FSM_STATE <= STATE_INIT;
+                end if;
+                current_round_key <= KEY;
+            WHEN STATE_ROTWORD =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                current_round_key <= current_round_key;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                last_column(31 downto 24) <= current_round_key(23 downto 16);
+                last_column(23 downto 16) <= current_round_key(15 downto 8);
+                last_column(15 downto 8) <= current_round_key(7 downto 0);
+                last_column(7 downto 0) <= current_round_key(31 downto 24);
+                FSM_STATE <= STATE_SUBWORD;
+            WHEN STATE_SUBWORD =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                current_round_key <= current_round_key;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                last_column(31 downto 24) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(31 downto 24)))));
+                last_column(23 downto 16) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(23 downto 16)))));
+                last_column(15 downto 8) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(15 downto 8)))));
+                last_column(7 downto 0) <= std_logic_vector(SBOX(to_integer(unsigned(last_column(7 downto 0)))));
+                FSM_STATE <= STATE_RCON;
+            WHEN STATE_RCON =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                current_round_key <= current_round_key;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                last_column(31 downto 24) <= last_column(31 downto 24) xor std_logic_vector(RCONS(round));
+                last_column(23 downto 0) <= last_column(23 downto 0);
+                round := round + 1;
+                FSM_STATE <= STATE_NEXT_C1;			
+            WHEN STATE_NEXT_C1 =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                current_round_key(127 downto 96) <= current_round_key(127 downto 96) xor last_column;
+                FSM_STATE <= STATE_NEXT_C2;
+            WHEN STATE_NEXT_C2 =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                current_round_key(95 downto 64) <= current_round_key(95 downto 64) xor current_round_key(127 downto 96);
+                FSM_STATE <= STATE_NEXT_C3;
+            WHEN STATE_NEXT_C3 =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                current_round_key(63 downto 32) <= current_round_key(63 downto 32) xor current_round_key(95 downto 64);			
+                FSM_STATE <= STATE_NEXT_C4;
+            WHEN STATE_NEXT_C4 =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                current_round_key(31 downto 0) <= current_round_key(31 downto 0) xor current_round_key(63 downto 32);		
+                FSM_STATE <= STATE_ROUND_COMPLETE;
+            WHEN STATE_ROUND_COMPLETE =>
+                current_round_key <= current_round_key;
+                last_column <= last_column;
+                round := round;	
+                if(round = 1) then
+                    KEYS_EXP_INT(1279 downto 128) <= KEYS_EXP_INT(1279 downto 128);
+                    KEYS_EXP_INT(127 downto 0) <= current_round_key;
+                elsif(round = 2) then
+                    KEYS_EXP_INT(1279 downto 256) <= KEYS_EXP_INT(1279 downto 256);
+                    KEYS_EXP_INT(255 downto 128) <= current_round_key;
+                    KEYS_EXP_INT(127 downto 0) <= KEYS_EXP_INT(127 downto 0);
+                elsif(round = 3) then
+                    KEYS_EXP_INT(1279 downto 384) <= KEYS_EXP_INT(1279 downto 384);
+                    KEYS_EXP_INT(383 downto 256) <= current_round_key;
+                    KEYS_EXP_INT(255 downto 0) <= KEYS_EXP_INT(255 downto 0);
+                elsif(round = 4) then
+                    KEYS_EXP_INT(1279 downto 512) <= KEYS_EXP_INT(1279 downto 512);
+                    KEYS_EXP_INT(511 downto 384) <= current_round_key;
+                    KEYS_EXP_INT(383 downto 0) <= KEYS_EXP_INT(383 downto 0);
+                elsif(round = 5) then
+                    KEYS_EXP_INT(1279 downto 640) <= KEYS_EXP_INT(1279 downto 640);
+                    KEYS_EXP_INT(639 downto 512) <= current_round_key;
+                    KEYS_EXP_INT(511 downto 0) <= KEYS_EXP_INT(511 downto 0);
+                elsif(round = 6) then
+                    KEYS_EXP_INT(1279 downto 768) <= KEYS_EXP_INT(1279 downto 768);
+                    KEYS_EXP_INT(767 downto 640) <= current_round_key;
+                    KEYS_EXP_INT(639 downto 0) <= KEYS_EXP_INT(639 downto 0); 
+                elsif(round = 7) then
+                    KEYS_EXP_INT(1279 downto 896) <= KEYS_EXP_INT(1279 downto 896);
+                    KEYS_EXP_INT(895 downto 768) <= current_round_key;
+                    KEYS_EXP_INT(767 downto 0) <= KEYS_EXP_INT(767 downto 0);
+                elsif(round = 8) then
+                    KEYS_EXP_INT(1279 downto 1024) <= KEYS_EXP_INT(1279 downto 1024);
+                    KEYS_EXP_INT(1023 downto 896) <= current_round_key;
+                    KEYS_EXP_INT(895 downto 0) <= KEYS_EXP_INT(895 downto 0);
+                elsif(round = 9) then
+                    KEYS_EXP_INT(1279 downto 1152) <= KEYS_EXP_INT(1279 downto 1152);
+                    KEYS_EXP_INT(1151 downto 1024) <= current_round_key;
+                    KEYS_EXP_INT(1023 downto 0) <= KEYS_EXP_INT(1023 downto 0);
+                elsif(round = 10) then
+                    KEYS_EXP_INT(1279 downto 1152) <= current_round_key;
+                    KEYS_EXP_INT(1151 downto 0) <= KEYS_EXP_INT(1151 downto 0);
+                else
+                    KEYS_EXP_INT <= (others => '1');
+                end if;
+                if(round = 10) then
+                    KEY_RESULT <= '1';
+                    STATUS <= KEY_RESULT;
+                    KEYS_EXP <= KEYS_EXP_INT;
+                    FSM_STATE <= STATE_COMPLETE;
+                else
+                    KEY_RESULT <= '0';
+                    STATUS <= KEY_RESULT;
+                    KEYS_EXP <= KEYS_EXP_INT;
+                    FSM_STATE <= STATE_ROTWORD;
+                end if;
+            WHEN STATE_COMPLETE =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                current_round_key <= current_round_key;
+                last_column <= last_column;
+                round := round;
+                FSM_STATE <= STATE_COMPLETE;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+            WHEN OTHERS =>
+                KEYS_EXP <= KEYS_EXP_INT;
+                KEYS_EXP_INT <= KEYS_EXP_INT;
+                current_round_key <= current_round_key;
+                last_column <= last_column;
+                STATUS <= KEY_RESULT;
+                KEY_RESULT <= KEY_RESULT;
+                round := round;
+                FSM_STATE <= FSM_STATE;
+        END CASE;
+	END IF;
+  END IF;
 END PROCESS;
 end RTL;
 
