@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdint.h>
 #include "xparameters.h"
 #include "xgpio.h"
 #include "xgpiops.h"
@@ -21,80 +23,78 @@ void get_encrypted_text(unsigned int crypto[AES_WORDS_OPS]);
 
 int main (void)
 {
-	  int i= 0, j=0;
-	  unsigned int text[AES_WORDS_OPS];
-	  unsigned int key[AES_WORDS_OPS];
-	  unsigned int crypto[AES_WORDS_OPS];
-	  XTime start_XTime, stop_time;
+	  int delay= 0, iteration=0;
+	  unsigned int text[AES_WORDS_OPS], key[AES_WORDS_OPS], crypto[AES_WORDS_OPS];
+	  XTime start_AES_time, stop_AES_time;
 
 	  print_AES_Accelerator_ID();
 	  print_status_register();
-	  xil_printf("Clock Frequency: %d Hz\n\r", XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ);
+	  printf("Clock Frequency: %d Hz\n\r", XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ);
 
 	  key[0] = 0x2B7E1516;
 	  key[1] = 0x28AED2A6;
 	  key[2] = 0xABF71588;
 	  key[3] = 0x09CF4F3C;
-	  xil_printf("Setting AES 128-bit key: %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
+	  printf("Setting AES 128-bit key: %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
 	  set_key_128Bits(key);
 
 	  text[0] = 0x3243F6A8;
 	  text[1] = 0x885A308D;
 	  text[2] = 0x313198A2;
 	  text[3] = 0xE0370734;
-	  xil_printf("Setting plain text 128-bit to be encrypted: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
+	  printf("Setting plain text 128-bit to be encrypted: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
 	  set_plain_text(text);
 
-	  xil_printf("Start AES accelerator's key expansion\n\r");
-	  XTime_GetTime(&start_XTime);
+	  printf("Start AES accelerator's key expansion\n\r");
+	  XTime_GetTime(&start_AES_time);
 	  start_key_expansion();
-
-	  while(! (*(aes_accelerator_baseaddr_p+3)))
+	  while(! (*(aes_accelerator_baseaddr_p+3)))		// Better to use interrupts
 	  {
 	  }
-	  XTime_GetTime(&stop_time);
-	  xil_printf("Key expansion status : 0x%08x\n\r", get_key_expansion_status());
-	  //xil_printf("AES Accelerator's key expansion time laps: %f ms\n\r", (float)(stop_time - start_XTime)/(float)XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ * (float)1000);
+	  XTime_GetTime(&stop_AES_time);
+	  printf("Key expansion status : 0x%08x\n\r", get_key_expansion_status());
+	  printf("AES Accelerator's key expansion time laps: %f us\n\r", (float)(stop_AES_time - start_AES_time)/(float)XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ*1000000.0f);
 
-	  xil_printf("Start AES accelerator's Encryption\n\r");
-	  XTime_GetTime(&start_XTime);
+	  printf("Start AES accelerator's Encryption\n\r");
+	  XTime_GetTime(&start_AES_time);
 	  start_encryption();
-
-	  while(!(*(aes_accelerator_baseaddr_p+2)))
+	  while(!(*(aes_accelerator_baseaddr_p+2)))		// Better to use interrupts
 	  {
 	  }
-	  XTime_GetTime(&stop_time);
-	  xil_printf("Encryption status : 0x%08x \n\r", get_encryption_status());
-	  //xil_printf("AES Accelerator's Encryption time laps: %f ms\n\r", (float)(stop_time - start_XTime)/(float)XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ * (float)1000);
+	  XTime_GetTime(&stop_AES_time);
+	  printf("Encryption status : 0x%08x \n\r", get_encryption_status());
+	  printf("AES Accelerator's Encryption time laps: %f us\n\r", (float)(stop_AES_time - start_AES_time)/(float)XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ*1000000.0f);
 
 	  get_encrypted_text(crypto);
-	  xil_printf("AES 128-bit key : %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
-	  xil_printf("Plain text 128-bit: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
-	  xil_printf("Encrypted cipher AES 128-bit: %08x%08x%08x%08x\n\r", crypto[0], crypto[1], crypto[2], crypto[3]);
-	  xil_printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
+	  printf("AES 128-bit key : %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
+	  printf("Plain text 128-bit: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
+	  printf("Encrypted cipher AES 128-bit: %08x%08x%08x%08x\n\r", crypto[0], crypto[1], crypto[2], crypto[3]);
+	  printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
 
-	  xil_printf("Stop AES accelerator's Encryption\n\r");
+	  printf("Stop AES accelerator's Encryption\n\r");
 	  stop_encryption();
-	  for (i=0; i<999999999; i++);
+	  for (delay=0; delay<999999999; delay++);
 
 	  while(1)
 	  {
-		  xil_printf("**************** Print next iteration of key to check stability ****************\n\r");
-		  xil_printf("Start AES accelerator's Encryption\n\r");
+		  printf("**************** Print %d iteration of key to check stability ****************\n\r", ++iteration);
+		  printf("Start AES accelerator's Encryption\n\r");
+		  XTime_GetTime(&start_AES_time);
 		  start_encryption();
-
-		  while(!(*(aes_accelerator_baseaddr_p+2))){
+		  while(!(*(aes_accelerator_baseaddr_p+2))){		// Better to use interrupts
 		  }
+		  XTime_GetTime(&stop_AES_time);
 
-		  xil_printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
-		  xil_printf("Crypto status : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+2));
-		  xil_printf("Key status : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+3));
-		  xil_printf("AES 128-bit key : %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
-		  xil_printf("Plain text 128-bit: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
-		  xil_printf("Encrypted cipher AES 128-bit: %08x%08x%08x%08x\n\r", *(aes_accelerator_baseaddr_p+12), *(aes_accelerator_baseaddr_p+13), *(aes_accelerator_baseaddr_p+14), *(aes_accelerator_baseaddr_p+15));
-		  xil_printf("Stop AES accelerator's Encryption\n\r");
+		  printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
+		  printf("Crypto status : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+2));
+		  printf("Key status : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+3));
+		  printf("AES 128-bit key : %08x%08x%08x%08x\n\r", key[0], key[1], key[2], key[3]);
+		  printf("Plain text 128-bit: %08x%08x%08x%08x\n\r", text[0], text[1], text[2], text[3]);
+		  printf("Encrypted cipher AES 128-bit: %08x%08x%08x%08x\n\r", *(aes_accelerator_baseaddr_p+12), *(aes_accelerator_baseaddr_p+13), *(aes_accelerator_baseaddr_p+14), *(aes_accelerator_baseaddr_p+15));
+		  printf("AES Accelerator's Encryption time laps: %f us\n\r", (float)(stop_AES_time - start_AES_time)/(float)XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ*1000000.0f);
+		  printf("Stop AES accelerator's Encryption\n\r");
 		  stop_encryption();
-		  for (i=0; i<99999999; i++);
+		  for (delay=0; delay<99999999; delay++);
 	  }
 
 	  return 0;
@@ -123,7 +123,7 @@ void stop_encryption(){
 }
 
 void print_status_register(){
-	xil_printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
+	printf("status registers : 0x%08x \n\r", *(aes_accelerator_baseaddr_p+17));
 }
 
 unsigned int get_key_expansion_status(){
@@ -134,7 +134,7 @@ unsigned int get_encryption_status(){
 	return *(aes_accelerator_baseaddr_p+2);
 }
 void print_AES_Accelerator_ID(){
-	xil_printf("AES Accelerator ID: 0x%08x \n\r", *(aes_accelerator_baseaddr_p+16));
+	printf("AES Accelerator ID: 0x%08x \n\r", *(aes_accelerator_baseaddr_p+16));
 }
 void get_encrypted_text(unsigned int crypto[AES_WORDS_OPS]){
 	crypto[0]=*(aes_accelerator_baseaddr_p+12);
